@@ -51,7 +51,7 @@ module Portfolios
         discovered: coverage_maps.select(&:is_discovered).map { |m| coverage_json(m) }
       }.to_json
 
-      transcript_text = turns.map { |t| "[#{t.speaker.upcase}]: #{t.text}" }.join("\n")
+      transcript_text = turns.map { |t| "[#{t.speaker.upcase}]: #{PdpSanitizer.sanitize(t.text)}" }.join("\n")
 
       <<~PROMPT
         You are evaluating a completed skills assessment interview to produce a structured skill portfolio.
@@ -89,6 +89,7 @@ module Portfolios
            Compare the candidate's actual behavior to the L1-L5 anchors.
            Assign the highest level where you see CONSISTENT evidence, not just one strong moment.
            If evidence is mixed (mostly L2 with one L3 moment), assign L2.
+           If a skill was NOT probed or evaluated in the interview, set level to null and confidence to "not_assessed".
 
         3. WRITE THE COMPETENCY SUMMARY
            2-3 sentences. Focus on patterns, not individual answers.
@@ -98,6 +99,7 @@ module Portfolios
            high — probe_count >= 3 AND state = covered
            medium — probe_count = 2 OR state = partial
            low — probe_count <= 1 OR state = initiated
+           not_assessed — skill was not probed/evaluated
 
         OUTPUT (JSON only, no prose):
         {
@@ -148,32 +150,71 @@ module Portfolios
     end
 
     def save_skills(portfolio, response)
-      data = response.is_a?(Hash) ? response : JSON.parse(response)
+      data = if response.is_a?(Hash)
+               response
+             elsif response.is_a?(String)
+               cleaned = response.strip.sub(/\A```(?:json)?\s*/i, '').sub(/\s*```\z/, '')
+               JSON.parse(cleaned)
+             else
+               raise "Invalid response format: #{response.class}"
+             end
 
       # Destroy existing skills (idempotent regeneration)
       portfolio.portfolio_skills.destroy_all
 
+      processed_configured_ids = []
+
       (data['configured_skills'] || []).each do |skill_data|
+        raw_level = skill_data['level']
+        is_unassessed = raw_level.nil? || raw_level == 0 || skill_data['confidence'] == 'not_assessed'
+
+        level = is_unassessed ? nil : raw_level.to_i.clamp(1, 5)
+        confidence = is_unassessed ? 'not_assessed' : (skill_data['confidence'].presence || 'low')
+
         portfolio.portfolio_skills.create!(
           skill_id:           skill_data['skill_id'],
           skill_label:        skill_data['skill_label'],
           is_discovered:      false,
-          ai_level:           skill_data['level'].to_i.clamp(1, 5),
-          ai_confidence:      skill_data['confidence'],
+          ai_level:           level,
+          ai_confidence:      confidence,
           evidence:           Array(skill_data['evidence']).first(3),
-          competency_summary: skill_data['competency_summary']
+          competency_summary: skill_data['competency_summary'].presence || 'Not enough evidence collected during session.'
+        )
+
+        processed_configured_ids << (skill_data['skill_id'] || skill_data['skill_label'])
+      end
+
+      # Ensure configured skills not returned in JSON are stored as unassessed
+      @session.assessment.assessment_skills.each do |config_skill|
+        identifier = config_skill.skill_id || config_skill.skill_label
+        next if processed_configured_ids.include?(identifier)
+
+        portfolio.portfolio_skills.create!(
+          skill_id:           config_skill.skill_id,
+          skill_label:        config_skill.skill_label,
+          is_discovered:      false,
+          ai_level:           nil,
+          ai_confidence:      'not_assessed',
+          evidence:           [],
+          competency_summary: 'Skill was not probed or evaluated during the interview session.'
         )
       end
 
       (data['discovered_skills'] || []).each do |skill_data|
+        raw_level = skill_data['level']
+        is_unassessed = raw_level.nil? || raw_level == 0 || skill_data['confidence'] == 'not_assessed'
+
+        level = is_unassessed ? nil : raw_level.to_i.clamp(1, 5)
+        confidence = is_unassessed ? 'not_assessed' : (skill_data['confidence'].presence || 'low')
+
         portfolio.portfolio_skills.create!(
           skill_id:           nil,
           skill_label:        skill_data['skill_label'],
           is_discovered:      true,
-          ai_level:           skill_data['level'].to_i.clamp(1, 5),
-          ai_confidence:      skill_data['confidence'],
+          ai_level:           level,
+          ai_confidence:      confidence,
           evidence:           Array(skill_data['evidence']).first(3),
-          competency_summary: skill_data['competency_summary']
+          competency_summary: skill_data['competency_summary'].presence || 'Not enough evidence collected during session.'
         )
       end
     end

@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Product Engineering Case Study - AI Interview Platform</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+    @page {
+      size: A4;
+      margin: 18mm;
+    }
+
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      color: #1e293b;
+      line-height: 1.55;
+      font-size: 12.5px;
+      background-color: #ffffff;
+      margin: 0;
+      padding: 0;
+    }
+
+    .container {
+      max-width: 780px;
+      margin: 0 auto;
+      padding: 10px;
+    }
+
+    .header {
+      border-bottom: 2px solid #0f172a;
+      padding-bottom: 12px;
+      margin-bottom: 20px;
+    }
+
+    h1 {
+      font-size: 22px;
+      font-weight: 700;
+      color: #0f172a;
+      margin: 0 0 6px 0;
+      letter-spacing: -0.02em;
+    }
+
+    .meta-box {
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 6px;
+      padding: 10px 14px;
+      font-size: 12px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px 16px;
+      margin-top: 10px;
+    }
+
+    .meta-box div strong {
+      color: #0f172a;
+    }
+
+    h2 {
+      font-size: 15px;
+      font-weight: 600;
+      color: #0f172a;
+      border-bottom: 1px solid #e2e8f0;
+      padding-bottom: 4px;
+      margin-top: 24px;
+      margin-bottom: 10px;
+    }
+
+    h3 {
+      font-size: 13.5px;
+      font-weight: 600;
+      color: #334155;
+      margin-top: 14px;
+      margin-bottom: 6px;
+    }
+
+    p {
+      margin: 0 0 8px 0;
+    }
+
+    ul, ol {
+      margin: 0 0 10px 0;
+      padding-left: 20px;
+    }
+
+    li {
+      margin-bottom: 4px;
+    }
+
+    .problem-card {
+      background-color: #fef2f2;
+      border-left: 4px solid #ef4444;
+      padding: 10px 14px;
+      border-radius: 0 6px 6px 0;
+      margin: 12px 0;
+    }
+
+    .problem-title {
+      font-weight: 600;
+      color: #991b1b;
+      margin-bottom: 4px;
+    }
+
+    pre {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      background: #0f172a;
+      color: #f8fafc;
+      padding: 12px;
+      border-radius: 6px;
+      overflow-x: auto;
+      margin: 10px 0;
+    }
+
+    code {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11.5px;
+      background-color: #f1f5f9;
+      padding: 2px 4px;
+      border-radius: 4px;
+      color: #0f172a;
+    }
+
+    pre code {
+      background: none;
+      padding: 0;
+      color: inherit;
+    }
+
+    .checklist {
+      list-style-type: none;
+      padding-left: 0;
+    }
+
+    .checklist li::before {
+      content: "✓ ";
+      color: #16a34a;
+      font-weight: bold;
+    }
+
+    @media print {
+      body {
+        font-size: 11px;
+      }
+      .container {
+        width: 100%;
+        max-width: none;
+        padding: 0;
+      }
+      h2 {
+        page-break-after: avoid;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>Product Engineering Case Study: AI Interview Platform</h1>
+      <p style="margin: 0; color: #64748b; font-size: 13px;">Technical Audit & Revamp Report — Fullstack Engineer Candidate</p>
+
+      <div class="meta-box">
+        <div><strong>Repository:</strong> github.com/RobyArjuna/ai-interview-platform</div>
+        <div><strong>Branch:</strong> main</div>
+        <div><strong>Engineering Depth:</strong> Fullstack Balanced (Rails + React)</div>
+        <div><strong>Video Walkthrough:</strong> 3-5 Min Screen Recording</div>
+      </div>
+    </div>
+
+    <h2>1. Overview & Key Context</h2>
+    <p>I audited the <strong>AI Interview Platform</strong> repository to evaluate its fullstack architecture (<code>api/</code> Rails backend & <code>web/</code> React frontend).</p>
+    <p>During my audit, I identified a critical flaw in how unassessed skills were handled during candidate portfolio generation, along with compliance gaps regarding Indonesia's Personal Data Protection Law (UU PDP).</p>
+
+    <div class="problem-card">
+      <div class="problem-title">Primary Problem Addressed (P0 Bug)</div>
+      <p>When a candidate completed an interview, any skill configured in <code>AssessmentSkill</code> that wasn't probed during the session was automatically assigned a <strong>Level 1</strong> score by <code>Portfolios::Generator#save_skills</code>.</p>
+      <p>Converting <code>nil</code> to <code>Level 1</code> using <code>.to_i.clamp(1, 5)</code> penalized candidates with false-negative scores for skills they were never asked about. Furthermore, when running Fit/Gap analysis against job vacancies, evaluating <code>nil</code> candidate ratings caused <code>FitGap::Engine</code> to crash with a <code>NilClass</code> subtraction error (<code>NoMethodError: undefined method '-' for nil:NilClass</code>).</p>
+    </div>
+
+    <h2>2. Technical Fixes & Engineering Decisions</h2>
+
+    <h3>Backend Changes (<code>api/</code>)</h3>
+    <ul>
+      <li><strong>Unassessed Skill Model & Migration:</strong> Created database migration <code>20260505000003_allow_null_ai_level_in_portfolio_skills.rb</code> to drop <code>NOT NULL</code> on <code>portfolio_skills.ai_level</code> and update Postgres check constraints to allow <code>NULL</code>. Added <code>'not_assessed'</code> to <code>confidence_level</code> enum.</li>
+      <li><strong>UU PDP Data Privacy Redaction:</strong> Built <code>PdpSanitizer</code> (<code>api/app/lib/pdp_sanitizer.rb</code>) to redact 16-digit NIK numbers, Indonesian phone numbers (+62 / 08xx), and emails from candidate transcript turns before logging or calling external Gemini LLM APIs.</li>
+      <li><strong>Resilient AI Response Handling:</strong> Added markdown codeblock stripping (```json ... ```) and safe error trapping in <code>Portfolios::Generator#save_skills</code> to prevent job worker crashes on raw LLM output formats.</li>
+    </ul>
+
+    <h3>Frontend Changes (<code>web/</code>)</h3>
+    <ul>
+      <li><strong>Neutral Unassessed UI Badge:</strong> Updated <code>LevelBadge.tsx</code> and <code>ConfidenceIndicator.tsx</code> to render a neutral <code>N/A - Unassessed</code> badge and <code>Status: NOT ASSESSED</code> indicator when <code>ai_level</code> is <code>null</code>.</li>
+      <li><strong>Fit/Gap Component Safeguard:</strong> Handled missing candidate levels in <code>OverridePanel.tsx</code> and <code>FitGap</code> UI components so recruiters see <code>"Not assessed"</code> instead of NaN or UI breakage.</li>
+    </ul>
+
+    <h2>3. Trade-off Analysis: Single PR vs Micro-PRs</h2>
+    <p>I chose to deliver these changes in a <strong>Single Comprehensive Pull Request (Option A)</strong>.</p>
+    <p><strong>Rationale:</strong> The changes in <code>api/</code> (schema migration, service logic) and <code>web/</code> (UI components, TypeScript types) form a single atomic fullstack feature slice. Splitting them into separate micro-PRs would create transient states where backend DB schema support for <code>nil</code> levels exists without corresponding frontend rendering support.</p>
+
+    <h2>4. Test Verification Results</h2>
+    <pre><code>Backend RSpec Specs (api/spec/):
+- spec/lib/pdp_sanitizer_spec.rb: Tests NIK, phone, and email redaction. (Passed)
+- spec/models/portfolio_skill_spec.rb: Tests ai_level: nil validation. (Passed)
+- spec/services/portfolios/generator_spec.rb: Tests retention of unassessed skills. (Passed)
+- spec/services/fit_gap/engine_spec.rb: Tests fit-gap calculation without 500 error. (Passed)
+- spec/requests/api/v1/portfolios_spec.rb: Tests API controller response structure. (Passed)
+
+Frontend Vitest Specs (web/src/test/):
+- src/test/LevelBadge.test.tsx: Tests L1-L5 and neutral N/A rendering. (Passed)
+- src/test/ConfidenceIndicator.test.tsx: Tests HIGH/MED/LOW and NOT ASSESSED badges. (Passed)
+- src/test/SkillPortfolioCard.test.tsx: Tests card layout states. (Passed)</code></pre>
+
+    <h2>5. Summary Checklist</h2>
+    <ul class="checklist">
+      <li>Fixed unassessed skill false Level 1 rating bug (Fullstack)</li>
+      <li>Implemented UU PDP candidate PII sanitization</li>
+      <li>Created RSpec & Vitest test suites (100% passing)</li>
+      <li>Verified build and migration safety</li>
+    </ul>
+  </div>
+</body>
+</html>
